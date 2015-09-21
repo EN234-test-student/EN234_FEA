@@ -24,27 +24,33 @@ subroutine explicit_dynamic_step
     TIME = 0.d0
     DTIME = dynamic_timestep
 
+    write(IOW,'(//A//)') '  Started explicit dynamic analysis '
+
     !       Mass matrix assumed to be constant - move this into time loop if not
 
     call assemble_lumped_mass
 
     velocity(1:neq) = dof_increment(1:neq)
     acceleration(1:neq) = 0.d0
-
-
     do istep = 1,no_dynamic_steps
+
 
         dof_increment(1:neq) = DTIME*(velocity(1:neq) + 0.5d0*DTIME*acceleration(1:neq))
 
         rforce = 0.d0
-
         call apply_dynamic_boundaryconditions
- 
+
         if (stateprint) then
+             write(IOW,*) ' '
+             write(IOW,*) '  Step ',istep,' completed'
+             write(IOW,*) '  Elapsed time is ',TIME
+             write(IOW,*) '  Printing state... '
             if (mod(istep,state_print_steps)==0) call print_state
         endif
 
         if (userprint) then
+             write(IOW,*) '  Step ',istep,' completed'
+             write(IOW,*) '  User print activated '
             if (mod(istep,user_print_steps)==0) call user_print(istep)
         endif
 
@@ -122,19 +128,20 @@ subroutine assemble_lumped_mass
             end do
         end do
 
-        !     Form element stiffness
+        !     Form element lumped mass
         iof = element_list(lmn)%state_index
         if (iof==0) iof = 1
         ns = element_list(lmn)%n_states
         if (ns==0) ns=1
 
-        call user_element_lumped_mass(lmn, element_list(lmn)%flag, element_list(lmn)%n_nodes, local_nodes, &       ! Input variables
-            densities(element_list(lmn)%density_index),   &                                                 ! Input variables
+        call user_element_lumped_mass(lmn, element_list(lmn)%flag, element_list(lmn)%n_nodes,&                           ! Input variables
+            local_nodes(1:element_list(lmn)%n_nodes), &                                                                  ! Input variables
+            densities(element_list(lmn)%density_index),   &                                                              ! Input variables
             element_list(lmn)%n_element_properties, element_properties(element_list(lmn)%element_property_index),  &     ! Input variables
-            element_coords, element_dof_increment, element_dof_total,      &                              ! Input variables
-            ns, initial_state_variables(iof:iof+ns-1), &                                                  ! Input variables
-            updated_state_variables(iof:iof+ns),element_mass)                 ! Output variables
-      
+            element_coords(1:ix),ix, element_dof_increment(1:iu), element_dof_total(1:iu),iu,      &                     ! Input variables
+            ns, initial_state_variables(iof:iof+ns-1), &                                                                ! Input variables
+            updated_state_variables(iof:iof+ns),element_mass(1:iu))                 ! Output variables
+
         !     --   Add element lumped mass matrix to global array
         irow = 1
         do i1 = 1, element_list(lmn)%n_nodes
@@ -145,7 +152,7 @@ subroutine assemble_lumped_mass
             irow = irow + nn
         end do
     end do
-  
+
     return
   
 end subroutine assemble_lumped_mass
@@ -162,7 +169,7 @@ subroutine assemble_dynamic_force
     integer      :: status
     integer      :: lmn
     integer      :: ix,iu,j,n,k,iof,ns
-    integer      :: irow,i1,node1
+    integer      :: irow,i1,node1,iofr
   
   
     integer      :: nn
@@ -193,6 +200,7 @@ subroutine assemble_dynamic_force
 
 
     do lmn = 1, n_elements
+        if (element_deleted(lmn)) cycle
 
           !     Extract local coords, DOF for the element
         ix = 0
@@ -213,26 +221,27 @@ subroutine assemble_dynamic_force
                 element_dof_total(iu) = dof_total(node_list(n)%dof_index + k - 1)
             end do
         end do
-        !     Form element stiffness
+        !     Form element contribution to nodal force vector
         iof = element_list(lmn)%state_index
         if (iof==0) iof = 1
         ns = element_list(lmn)%n_states
         if (ns==0) ns=1
 
-        call user_element_dynamic(lmn, element_list(lmn)%flag, element_list(lmn)%n_nodes, local_nodes, &       ! Input variables
-            element_list(lmn)%n_element_properties, element_properties(element_list(lmn)%element_property_index),  &     ! Input variables
-            element_coords, element_dof_increment, element_dof_total,      &                              ! Input variables
-            ns, initial_state_variables(iof:iof+ns-1), &                           ! Input variables
-            updated_state_variables(iof:iof+ns),element_residual)               ! Output variables
+        call user_element_dynamic(lmn, element_list(lmn)%flag, element_list(lmn)%n_nodes, &                            ! Input variables
+            local_nodes(1:element_list(lmn)%n_nodes), &                                                                ! Input variables
+            element_list(lmn)%n_element_properties, element_properties(element_list(lmn)%element_property_index),  &   ! Input variables
+            element_coords(1:ix),ix, element_dof_increment(1:iu), element_dof_total(1:iu),iu,      &                   ! Input variables
+            ns, initial_state_variables(iof:iof+ns-1), &                                                               ! Input variables
+            updated_state_variables(iof:iof+ns),element_residual(1:iu),element_deleted(lmn))                           ! Output variables
       
 
         !     --   Add element force vector to global array
         irow = 1
         do i1 = 1, element_list(lmn)%n_nodes
             node1 = connectivity(i1 + element_list(lmn)%connect_index - 1)
-            iof = node_list(node1)%dof_index
+            iofr = node_list(node1)%dof_index
             nn = node_list(node1)%n_dof
-            rforce(iof:iof+nn-1) = rforce(iof:iof+nn-1) + element_residual(irow:irow+nn-1)
+            rforce(iofr:iofr+nn-1) = rforce(iofr:iofr+nn-1) + element_residual(irow:irow+nn-1)
             irow = irow + nn
         end do
     end do
@@ -260,45 +269,13 @@ subroutine apply_dynamic_boundaryconditions
     use Globals, only : TIME, DTIME
     implicit none
 
-    interface
-        subroutine traction_boundarycondition_dynamic(flag,ndims,ndof,nfacenodes,element_coords,&
-            element_dof_increment,element_dof_total,traction,&
-            element_residual)               ! Output variables
-            use Types
-            use ParamIO
-            use Element_Utilities, only : N1 => shape_functions_1D, dNdxi1 => shape_function_derivatives_1D
-            use Element_Utilities, only : dNdx1 => shape_function_spatial_derivatives_1D
-            use Element_Utilities, only : xi1 => integrationpoints_1D, w1 => integrationweights_1D
-            use Element_Utilities, only : N2 => shape_functions_2D, dNdxi2 => shape_function_derivatives_2D
-            use Element_Utilities, only : dNdx2 => shape_function_spatial_derivatives_2D
-            use Element_Utilities, only : xi2 => integrationpoints_2D, w2 => integrationweights_2D
-            use Element_Utilities, only : initialize_integration_points
-            use Element_Utilities, only : calculate_shapefunctions
-
-            implicit none
-
-            integer, intent( in )      :: flag                     ! Flag specifying traction type. 1=direct value; 2=history+direct; 3=normal+history
-            integer, intent( in )      :: ndims                    ! No. coords for nodes
-            integer, intent( in )      :: ndof                     ! No. DOFs for nodes
-            integer, intent( in )      :: nfacenodes               ! No. nodes on face
-            real( prec ), intent( in ) :: element_coords(:)        ! List of coords
-            real( prec ), intent( in ) :: element_dof_total(:)     ! List of DOFs (not currently used, provided for extension to finite deformations)
-            real( prec ), intent( in ) :: element_dof_increment(:) ! List of DOF increments (not used)
-            real( prec ), intent( in ) :: traction(:)              ! Traction value
-
-            real( prec ), intent( out )   :: element_residual(:)      ! Element residual force (ROW)
-  
-        end subroutine traction_boundarycondition_dynamic
-    end interface
-
-
 
     ! Local Variables
     logical :: ignoredof
     real( prec ) :: ucur, dofvalue, dloadvalue, force_value
     integer :: idof, ix,iu, i,j,k, lmn, n, iof, iofs,nhist, nparam, nnodes, status
     integer :: load,flag,elset,ifac,nel,param_index,ntract,ndims,ndof,nfacenodes
-    integer :: i1,node1,irow,nn
+    integer :: i1,node1,irow,nn,iofr
     integer :: list(8)
        
        
@@ -332,7 +309,8 @@ subroutine apply_dynamic_boundaryconditions
             stop
         endif
     endif
-       
+
+
      !  -- Distributed forces on element faces
    
     do load = 1, n_distributedloads
@@ -341,7 +319,6 @@ subroutine apply_dynamic_boundaryconditions
         ifac = distributedload_list(load)%face
         nel = elementset_list(elset)%n_elements
         iof = elementset_list(elset)%index
-    
         if (flag<4) then
             do k  = 1, nel
                 lmn = element_lists(iof+k-1)
@@ -357,7 +334,7 @@ subroutine apply_dynamic_boundaryconditions
                     ntract = 1
                     traction(1) = 1.d0
                 endif
-                if (flag==2) traction = traction/dsqrt(dot_product(traction,traction))
+                if (flag==2) traction(1:ntract) = traction(1:ntract)/dsqrt(dot_product(traction(1:ntract),traction(1:ntract)))
                 if (flag>1) then
                     iof = history_list(distributedload_list(load)%history_number)%index
                     nhist = history_list(distributedload_list(load)%history_number)%n_timevals
@@ -380,17 +357,15 @@ subroutine apply_dynamic_boundaryconditions
                         element_dof_total(iu) = dof_total(node_list(n)%dof_index + i - 1)
                     end do
                 end do
-  
-                call traction_boundarycondition_dynamic(flag,ndims,ndof,nfacenodes,element_coords(1:ix),&
-                    element_dof_increment(1:iu),element_dof_total(1:iu),traction(1:ntract),&
-                    element_residual)               ! Output variables
-
+                call traction_boundarycondition_dynamic(flag,ndims,ndof,nfacenodes,element_coords(1:ix),ix,&
+                    element_dof_increment(1:iu),element_dof_total(1:iu),iu,traction(1:ntract),ntract,&
+                    element_residual(1:iu))               ! Output variables
                 irow = 1
                 do i1 = 1,nfacenodes
                     node1 = connectivity(element_list(lmn)%connect_index + list(i1) - 1)
-                    iof = node_list(node1)%dof_index
+                    iofr = node_list(node1)%dof_index
                     nn = node_list(node1)%n_dof
-                    rforce(iof:iof+nn-1) = rforce(iof:iof+nn-1) + element_residual(irow:irow+nn-1)
+                    rforce(iofr:iofr+nn-1) = rforce(iofr:iofr+nn-1) + element_residual(irow:irow+nn-1)
                     irow = irow + nn
                 end do
             end do
@@ -425,10 +400,10 @@ subroutine apply_dynamic_boundaryconditions
         
                 call user_distributed_load_dynamic(lmn, element_list(lmn)%flag, ifac, &      ! Input variables
                     subroutine_parameters(param_index:param_index+nparam-1),nparam, &       ! Input variables
-                    element_list(lmn)%n_nodes, local_nodes, &       ! Input variables
+                    element_list(lmn)%n_nodes, local_nodes(1:element_list(lmn)%n_nodes), &       ! Input variables
                     element_list(lmn)%n_element_properties, element_properties(element_list(lmn)%element_property_index),  &     ! Input variables
-                    element_coords, element_dof_increment, element_dof_total,      &                              ! Input variables
-                    element_residual)               ! Output variables
+                    element_coords(1:ix),ix, element_dof_increment(1:iu), element_dof_total(1:iu),iu,      &                              ! Input variables
+                    element_residual(1:iu))               ! Output variables
 
                 !     --   Add element stiffness and residual to global array
 

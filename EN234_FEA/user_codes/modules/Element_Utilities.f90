@@ -71,7 +71,7 @@ contains
             A_inverse(1,1) = A(2,2)
             A_inverse(2,2) = A(1,1)
             A_inverse(1,2) = -A(1,2)
-            A_inverse(2,1) = -A_inverse(2,1)
+            A_inverse(2,1) = -A(2,1)
             IF (determinant==0.d0) THEN
                 write(IOW,*) ' Error in element utility invert'
                 write(IOW,*) ' A 2x2 matrix has a zero determinant'
@@ -230,7 +230,7 @@ contains
 
      end function principalvals33
 
-     function rotatesymvec(symvec,R)     ! Apply
+     function rotatesymvec(symvec,R)     ! Apply a rigid rotation to a symmetric 3x3 stress or strain vector
 
          use Types
          implicit none
@@ -412,7 +412,7 @@ contains
                 xi(2, 3) = 0.D0
                 w(3) = w(1)
             else if ( n_points==4 ) then
-                if ( n_nodes==4 .or. n_nodes==9 ) then
+                if ( n_nodes==4 .or. n_nodes==8 .or. n_nodes==9 ) then
                     !     2X2 GAUSS INTEGRATION POINTS FOR QUADRILATERAL
                     !     43
                     !     12
@@ -721,6 +721,33 @@ contains
                 df(4, 2) = 4.D0*xi(1)
                 df(5, 2) = 4.D0*z + 4.D0*xi(2)*dzdq
                 df(6, 2) = 4.D0*xi(1)*dzdq
+
+            else if ( n_nodes==8 ) then
+                !     SHAPE FUNCTIONS FOR 8 NODED SERENDIPITY ELEMENT
+                 f(1) = -0.25*(1.-xi(1))*(1.-xi(2))*(1.+xi(1)+xi(2));
+                 f(2) = 0.25*(1.+xi(1))*(1.-xi(2))*(xi(1)-xi(2)-1.);
+                 f(3) = 0.25*(1.+xi(1))*(1.+xi(2))*(xi(1)+xi(2)-1.);
+                 f(4) = 0.25*(1.-xi(1))*(1.+xi(2))*(xi(2)-xi(1)-1.);
+                 f(5) = 0.5*(1.-xi(1)*xi(1))*(1.-xi(2));
+                 f(6) = 0.5*(1.+xi(1))*(1.-xi(2)*xi(2));
+                 f(7) = 0.5*(1.-xi(1)*xi(1))*(1.+xi(2));
+                 f(8) = 0.5*(1.-xi(1))*(1.-xi(2)*xi(2));
+                 df(1,1) = 0.25*(1.-xi(2))*(2.*xi(1)+xi(2));
+                 df(1,2) = 0.25*(1.-xi(1))*(xi(1)+2.*xi(2));
+                 df(2,1) = 0.25*(1.-xi(2))*(2.*xi(1)-xi(2));
+                 df(2,2) = 0.25*(1.+xi(1))*(2.*xi(2)-xi(1));
+                 df(3,1) = 0.25*(1.+xi(2))*(2.*xi(1)+xi(2));
+                 df(3,2) = 0.25*(1.+xi(1))*(2.*xi(2)+xi(1));
+                 df(4,1) = 0.25*(1.+xi(2))*(2.*xi(1)-xi(2));
+                 df(4,2) = 0.25*(1.-xi(1))*(2.*xi(2)-xi(1));
+                 df(5,1) = -xi(1)*(1.-xi(2));
+                 df(5,2) = -0.5*(1.-xi(1)*xi(1));
+                 df(6,1) = 0.5*(1.-xi(2)*xi(2));
+                 df(6,2) = -(1.+xi(1))*xi(2);
+                 df(7,1) = -xi(1)*(1.+xi(2));
+                 df(7,2) = 0.5*(1.-xi(1)*xi(1));
+                 df(8,1) = -0.5*(1.-xi(2)*xi(2));
+                 df(8,2) = -(1.-xi(1))*xi(2);
             else if ( n_nodes==9 ) then
                 !     SHAPE FUNCTIONS FOR 9 NODED LAGRANGIAN ELEMENT
                 !     789
